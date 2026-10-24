@@ -33,41 +33,100 @@ CREATE TABLE gst_rates (
 );
 
 -- ---------------------------------------------------------------- products & stock
+-- Two levels: parent_id NULL = category, otherwise sub-category.
 CREATE TABLE product_categories (
   id          INTEGER PRIMARY KEY,
+  parent_id   INTEGER REFERENCES product_categories(id),
   name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
   is_deleted  INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
-CREATE UNIQUE INDEX ux_product_categories_name ON product_categories(name COLLATE NOCASE) WHERE is_deleted = 0;
+CREATE UNIQUE INDEX ux_product_categories_name
+  ON product_categories(COALESCE(parent_id, 0), name COLLATE NOCASE) WHERE is_deleted = 0;
 
+-- Shared details of a product. What is stocked and sold is a product_variant.
 CREATE TABLE products (
+  id                  INTEGER PRIMARY KEY,
+  product_type        TEXT NOT NULL DEFAULT 'stock' CHECK (product_type IN ('stock','service')),
+  name                TEXT NOT NULL,
+  category_id         INTEGER REFERENCES product_categories(id),   -- category or sub-category
+  brand               TEXT,
+  unit                TEXT NOT NULL DEFAULT 'pcs',
+  hsn_code            TEXT,                  -- HSN (goods) / SAC (services); GST invoices only
+  gst_rate_bp         INTEGER NOT NULL DEFAULT 0 CHECK (gst_rate_bp BETWEEN 0 AND 10000),
+  price_includes_gst  INTEGER NOT NULL DEFAULT 1 CHECK (price_includes_gst IN (0,1)),
+  has_variants        INTEGER NOT NULL DEFAULT 0 CHECK (has_variants IN (0,1)),
+  is_universal        INTEGER NOT NULL DEFAULT 1 CHECK (is_universal IN (0,1)),  -- fits all vehicles
+  rack_location       TEXT,
+  warranty_months     INTEGER NOT NULL DEFAULT 0 CHECK (warranty_months >= 0),
+  image_path          TEXT,                  -- relative to data/, e.g. 'images/ab12.jpg'
+  notes               TEXT,
+  is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  is_deleted          INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
+  updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
+);
+CREATE INDEX ix_products_name ON products(name COLLATE NOCASE);
+CREATE INDEX ix_products_category ON products(category_id);
+CREATE INDEX ix_products_brand ON products(brand COLLATE NOCASE);
+
+-- The sellable / stockable unit. A product without variants has exactly one variant
+-- with empty color/size/variant_type.
+CREATE TABLE product_variants (
   id               INTEGER PRIMARY KEY,
-  code             TEXT,                               -- SKU / barcode, optional
-  name             TEXT NOT NULL,
-  category_id      INTEGER REFERENCES product_categories(id),
-  unit             TEXT NOT NULL DEFAULT 'pcs',
-  hsn_code         TEXT,                               -- printed on GST invoices only
+  product_id       INTEGER NOT NULL REFERENCES products(id),
+  sku              TEXT NOT NULL,
+  barcode          TEXT,
+  color            TEXT,
+  size             TEXT,
+  variant_type     TEXT,
   purchase_price   INTEGER NOT NULL DEFAULT 0 CHECK (purchase_price >= 0),
+  mrp              INTEGER NOT NULL DEFAULT 0 CHECK (mrp >= 0),
   selling_price    INTEGER NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
-  gst_rate_bp      INTEGER NOT NULL DEFAULT 0 CHECK (gst_rate_bp BETWEEN 0 AND 10000),
   min_stock_milli  INTEGER NOT NULL DEFAULT 0 CHECK (min_stock_milli >= 0),
   avg_cost         INTEGER NOT NULL DEFAULT 0 CHECK (avg_cost >= 0),  -- weighted average, per unit
+  sort_order       INTEGER NOT NULL DEFAULT 0,
   is_active        INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   is_deleted       INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
   created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
   updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
-CREATE UNIQUE INDEX ux_products_code ON products(code COLLATE NOCASE)
-  WHERE is_deleted = 0 AND code IS NOT NULL AND code <> '';
-CREATE INDEX ix_products_name ON products(name COLLATE NOCASE);
-CREATE INDEX ix_products_category ON products(category_id);
+CREATE INDEX ix_product_variants_product ON product_variants(product_id);
+CREATE UNIQUE INDEX ux_product_variants_sku ON product_variants(sku COLLATE NOCASE) WHERE is_deleted = 0;
+CREATE UNIQUE INDEX ux_product_variants_barcode ON product_variants(barcode)
+  WHERE is_deleted = 0 AND barcode IS NOT NULL AND barcode <> '';
 
--- Append-only. Stock = SUM(qty_milli). Reversals are new rows.
+CREATE TABLE vehicle_models (
+  id          INTEGER PRIMARY KEY,
+  make        TEXT NOT NULL,
+  model       TEXT NOT NULL,
+  is_deleted  INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0,1)),
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
+  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
+);
+CREATE UNIQUE INDEX ux_vehicle_models ON vehicle_models(make COLLATE NOCASE, model COLLATE NOCASE)
+  WHERE is_deleted = 0;
+
+-- Compatibility rows (only used when products.is_universal = 0). Years are inclusive, NULL = open.
+CREATE TABLE product_vehicles (
+  id                INTEGER PRIMARY KEY,
+  product_id        INTEGER NOT NULL REFERENCES products(id),
+  vehicle_model_id  INTEGER NOT NULL REFERENCES vehicle_models(id),
+  year_from         INTEGER CHECK (year_from IS NULL OR year_from BETWEEN 1900 AND 2200),
+  year_to           INTEGER CHECK (year_to IS NULL OR year_to BETWEEN 1900 AND 2200),
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
+  updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
+  UNIQUE (product_id, vehicle_model_id),
+  CHECK (year_from IS NULL OR year_to IS NULL OR year_from <= year_to)
+);
+CREATE INDEX ix_product_vehicles_model ON product_vehicles(vehicle_model_id);
+
+-- Append-only. Stock = SUM(qty_milli). Reversals are new rows. Services never get movements.
 CREATE TABLE stock_movements (
   id          INTEGER PRIMARY KEY,
-  product_id  INTEGER NOT NULL REFERENCES products(id),
+  variant_id  INTEGER NOT NULL REFERENCES product_variants(id),
   date        TEXT NOT NULL,
   type        TEXT NOT NULL CHECK (type IN
                 ('opening','purchase','purchase_return','sale','sale_return','adjustment')),
@@ -79,13 +138,13 @@ CREATE TABLE stock_movements (
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime')),
   updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
-CREATE INDEX ix_stock_movements_product_date ON stock_movements(product_id, date, id);
+CREATE INDEX ix_stock_movements_variant_date ON stock_movements(variant_id, date, id);
 CREATE INDEX ix_stock_movements_ref ON stock_movements(ref_type, ref_id);
 
-CREATE VIEW v_product_stock AS
-  SELECT p.id AS product_id, COALESCE(SUM(m.qty_milli), 0) AS stock_milli
-  FROM products p LEFT JOIN stock_movements m ON m.product_id = p.id
-  GROUP BY p.id;
+CREATE VIEW v_variant_stock AS
+  SELECT v.id AS variant_id, v.product_id, COALESCE(SUM(m.qty_milli), 0) AS stock_milli
+  FROM product_variants v LEFT JOIN stock_movements m ON m.variant_id = v.id
+  GROUP BY v.id;
 
 -- ---------------------------------------------------------------- parties
 CREATE TABLE parties (
@@ -142,7 +201,9 @@ CREATE TABLE purchase_items (
   id            INTEGER PRIMARY KEY,
   purchase_id   INTEGER NOT NULL REFERENCES purchases(id),
   product_id    INTEGER NOT NULL REFERENCES products(id),
+  variant_id    INTEGER NOT NULL REFERENCES product_variants(id),
   product_name  TEXT NOT NULL,                    -- snapshots
+  variant_label TEXT,                    -- e.g. "Black / Large"
   unit          TEXT NOT NULL,
   hsn_code      TEXT,
   qty_milli     INTEGER NOT NULL CHECK (qty_milli > 0),
@@ -159,7 +220,7 @@ CREATE TABLE purchase_items (
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
 CREATE INDEX ix_purchase_items_purchase ON purchase_items(purchase_id);
-CREATE INDEX ix_purchase_items_product ON purchase_items(product_id);
+CREATE INDEX ix_purchase_items_variant ON purchase_items(variant_id);
 
 CREATE TABLE purchase_returns (
   id             INTEGER PRIMARY KEY,
@@ -193,6 +254,7 @@ CREATE TABLE purchase_return_items (
   purchase_return_id  INTEGER NOT NULL REFERENCES purchase_returns(id),
   purchase_item_id    INTEGER REFERENCES purchase_items(id),
   product_id          INTEGER NOT NULL REFERENCES products(id),
+  variant_id          INTEGER NOT NULL REFERENCES product_variants(id),
   qty_milli           INTEGER NOT NULL CHECK (qty_milli > 0),
   rate                INTEGER NOT NULL CHECK (rate >= 0),
   gst_rate_bp         INTEGER NOT NULL DEFAULT 0,
@@ -206,7 +268,7 @@ CREATE TABLE purchase_return_items (
   updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
 CREATE INDEX ix_purchase_return_items_return ON purchase_return_items(purchase_return_id);
-CREATE INDEX ix_purchase_return_items_product ON purchase_return_items(product_id);
+CREATE INDEX ix_purchase_return_items_variant ON purchase_return_items(variant_id);
 
 -- ---------------------------------------------------------------- sales
 CREATE TABLE sales (
@@ -252,7 +314,9 @@ CREATE TABLE sale_items (
   id            INTEGER PRIMARY KEY,
   sale_id       INTEGER NOT NULL REFERENCES sales(id),
   product_id    INTEGER NOT NULL REFERENCES products(id),
+  variant_id    INTEGER NOT NULL REFERENCES product_variants(id),
   product_name  TEXT NOT NULL,                    -- snapshots for reprinting
+  variant_label TEXT,                    -- e.g. "Black / Large"
   unit          TEXT NOT NULL,
   hsn_code      TEXT,
   qty_milli     INTEGER NOT NULL CHECK (qty_milli > 0),
@@ -270,7 +334,7 @@ CREATE TABLE sale_items (
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
 );
 CREATE INDEX ix_sale_items_sale ON sale_items(sale_id);
-CREATE INDEX ix_sale_items_product ON sale_items(product_id);
+CREATE INDEX ix_sale_items_variant ON sale_items(variant_id);
 
 CREATE TABLE sale_returns (
   id             INTEGER PRIMARY KEY,
@@ -304,6 +368,7 @@ CREATE TABLE sale_return_items (
   sale_return_id  INTEGER NOT NULL REFERENCES sale_returns(id),
   sale_item_id    INTEGER NOT NULL REFERENCES sale_items(id),
   product_id      INTEGER NOT NULL REFERENCES products(id),
+  variant_id      INTEGER NOT NULL REFERENCES product_variants(id),
   qty_milli       INTEGER NOT NULL CHECK (qty_milli > 0),
   rate            INTEGER NOT NULL CHECK (rate >= 0),
   gst_rate_bp     INTEGER NOT NULL DEFAULT 0,
@@ -318,7 +383,7 @@ CREATE TABLE sale_return_items (
 );
 CREATE INDEX ix_sale_return_items_return ON sale_return_items(sale_return_id);
 CREATE INDEX ix_sale_return_items_item ON sale_return_items(sale_item_id);
-CREATE INDEX ix_sale_return_items_product ON sale_return_items(product_id);
+CREATE INDEX ix_sale_return_items_variant ON sale_return_items(variant_id);
 
 -- ---------------------------------------------------------------- accounts
 CREATE TABLE accounts (
@@ -409,6 +474,12 @@ CREATE TRIGGER trg_product_categories_updated AFTER UPDATE ON product_categories
   BEGIN UPDATE product_categories SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
 CREATE TRIGGER trg_products_updated AFTER UPDATE ON products FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
   BEGIN UPDATE products SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
+CREATE TRIGGER trg_product_variants_updated AFTER UPDATE ON product_variants FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
+  BEGIN UPDATE product_variants SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
+CREATE TRIGGER trg_vehicle_models_updated AFTER UPDATE ON vehicle_models FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
+  BEGIN UPDATE vehicle_models SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
+CREATE TRIGGER trg_product_vehicles_updated AFTER UPDATE ON product_vehicles FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
+  BEGIN UPDATE product_vehicles SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
 CREATE TRIGGER trg_parties_updated AFTER UPDATE ON parties FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
   BEGIN UPDATE parties SET updated_at = strftime('%Y-%m-%d %H:%M:%S','now','localtime') WHERE id = NEW.id; END;
 CREATE TRIGGER trg_purchases_updated AFTER UPDATE ON purchases FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at

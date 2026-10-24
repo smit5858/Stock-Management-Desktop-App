@@ -20,6 +20,16 @@ describe('resolvePaths', () => {
     expect(p.dataDir).toBe(path.join('G:\\StockApp', 'data'));
   });
 
+  it('honours PC_DEV_DATA_DIR only in dev', () => {
+    const env = { PC_DEV_DATA_DIR: 'D:\\tmp\\pc-test' };
+    expect(
+      resolvePaths({ isPackaged: false, execPath: 'x', env, devRoot: 'D:\\repo' }).dataDir,
+    ).toBe(path.resolve('D:\\tmp\\pc-test'));
+    expect(
+      resolvePaths({ isPackaged: true, execPath: 'F:\\StockApp\\Pragati Car.exe', env }).dataDir,
+    ).toBe(path.join('F:\\StockApp', 'data'));
+  });
+
   it('uses the repo root in dev', () => {
     const p = resolvePaths({ isPackaged: false, execPath: 'x', env: {}, devRoot: 'D:\\repo' });
     expect(p.backupsDir).toBe(path.join('D:\\repo', 'data', 'backups'));

@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { CheckCircle2, Info, XCircle } from 'lucide-react';
 
 const ToastContext = createContext(null);
 let nextId = 1;
 
 const STYLES = {
-  success: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-  error: 'border-red-300 bg-red-50 text-red-900',
-  info: 'border-slate-300 bg-white text-slate-800',
+  success: { icon: CheckCircle2, cls: 'text-success' },
+  error: { icon: XCircle, cls: 'text-danger' },
+  info: { icon: Info, cls: 'text-primary' },
 };
 
 export function ToastProvider({ children }) {
@@ -35,17 +37,28 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed right-4 bottom-10 z-50 flex w-96 flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role={t.type === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto rounded-md border px-4 py-3 shadow-md ${STYLES[t.type]}`}
-            onClick={() => dismiss(t.id)}
-          >
-            {t.message}
-          </div>
-        ))}
+      <div className="pointer-events-none fixed right-4 bottom-12 z-70 flex w-96 flex-col gap-2">
+        <AnimatePresence initial={false}>
+          {toasts.map((t) => {
+            const { icon: Icon, cls } = STYLES[t.type];
+            return (
+              <motion.div
+                key={t.id}
+                layout
+                initial={{ opacity: 0, x: 40, scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 40, transition: { duration: 0.15 } }}
+                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                role={t.type === 'error' ? 'alert' : 'status'}
+                className="pointer-events-auto flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg"
+                onClick={() => dismiss(t.id)}
+              >
+                <Icon size={18} className={`mt-px shrink-0 ${cls}`} />
+                <span className="text-fg">{t.message}</span>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
       </div>
     </ToastContext.Provider>
   );

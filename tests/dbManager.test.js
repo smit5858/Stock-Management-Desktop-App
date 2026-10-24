@@ -65,3 +65,62 @@ describe('db manager', () => {
     expect(dbm.listBackups().some((b) => b.reason === 'prerestore')).toBe(true);
   });
 });
+
+describe('schema upgrades', () => {
+  const { openDatabase } = require('../electron/db/connection.js');
+  const { migrate, MIGRATIONS_DIR } = require('../electron/db/migrate.js');
+  const path = require('node:path');
+  const { tempDir } = require('./helpers.js');
+
+  function copyMigrations(filter = () => true) {
+    const dir = tempDir();
+    for (const f of fs.readdirSync(MIGRATIONS_DIR).filter(filter)) {
+      fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(dir, f));
+    }
+    return dir;
+  }
+
+  function v4Database(paths) {
+    const db = openDatabase(paths.dbFile);
+    migrate(
+      db,
+      copyMigrations((f) => f < '005'),
+    );
+    db.prepare("UPDATE settings SET value = 'Before 005' WHERE key = 'business_name'").run();
+    db.close();
+  }
+
+  it('takes a pre-migration backup before upgrading existing data', async () => {
+    const paths = testPaths();
+    v4Database(paths);
+    expect((await dbm.startup(paths)).state).toBe('ok');
+    // One backup before each pending migration (005–007); the first is taken before 005.
+    const pre = dbm
+      .listBackups()
+      .filter((b) => b.reason === 'premigration')
+      .filter((b) => b.file_name.startsWith('pre-migration_005_'));
+    expect(pre).toHaveLength(1);
+    expect(pre[0].file_name).toMatch(/^pre-migration_005_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.db$/);
+    const copy = openDatabase(path.join(paths.backupsDir, pre[0].file_name));
+    expect(copy.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get()).toBe(4);
+    copy.close();
+  });
+
+  it('restores the pre-migration backup when an upgrade fails', async () => {
+    const paths = testPaths();
+    v4Database(paths);
+    const dir = copyMigrations();
+    fs.writeFileSync(path.join(dir, '008_broken.sql'), 'INSERT INTO no_such_table VALUES (1);');
+    const status = await dbm.startup(paths, { migrationsDir: dir });
+    expect(status.state).toBe('migration_failed');
+    const db = openDatabase(paths.dbFile);
+    // 005–007 succeeded, 008 failed: the file is exactly as it was before 008 ran.
+    expect(db.prepare('SELECT MAX(version) FROM schema_migrations').pluck().get()).toBe(7);
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'business_name'").pluck().get()).toBe(
+      'Before 005',
+    );
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
+    db.close();
+    expect(dbm.listBackups().filter((b) => b.reason === 'premigration')).toHaveLength(4);
+  });
+});

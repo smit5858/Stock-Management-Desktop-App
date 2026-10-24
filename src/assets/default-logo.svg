@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Pragati Car default logo: original design (simple classic sedan + wordmark). -->
+  <defs>
+    <linearGradient id="pc-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#pc-bg)"/>
+  <!-- road line -->
+  <rect x="34" y="160" width="188" height="4" rx="2" fill="#ffffff" opacity="0.35"/>
+  <!-- body -->
+  <path d="M34 150 L34 130 Q34 120 46 118 L82 114 Q98 86 124 82 L156 82 Q182 84 198 112 L214 115 Q226 118 226 130 L226 150 Z"
+        fill="#ffffff"/>
+  <!-- windows -->
+  <path d="M96 113 Q108 92 126 90 L138 90 L138 113 Z" fill="#7c3aed" opacity="0.85"/>
+  <path d="M144 90 L156 90 Q176 92 188 113 L144 113 Z" fill="#7c3aed" opacity="0.85"/>
+  <!-- chrome belt line + bumpers -->
+  <rect x="38" y="126" width="184" height="3" rx="1.5" fill="#c7d2fe"/>
+  <rect x="26" y="142" width="16" height="7" rx="3.5" fill="#e0e7ff"/>
+  <rect x="218" y="142" width="16" height="7" rx="3.5" fill="#e0e7ff"/>
+  <!-- headlight -->
+  <circle cx="220" cy="124" r="5" fill="#fde68a"/>
+  <!-- wheels -->
+  <circle cx="78" cy="150" r="17" fill="#1e1b4b"/>
+  <circle cx="78" cy="150" r="8" fill="#e0e7ff"/>
+  <circle cx="184" cy="150" r="17" fill="#1e1b4b"/>
+  <circle cx="184" cy="150" r="8" fill="#e0e7ff"/>
+  <!-- wordmark -->
+  <text x="128" y="206" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif"
+        font-size="34" font-weight="800" fill="#ffffff" letter-spacing="1">PRAGATI</text>
+  <text x="128" y="232" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif"
+        font-size="17" font-weight="600" fill="#e0e7ff" letter-spacing="9">CAR</text>
+</svg>

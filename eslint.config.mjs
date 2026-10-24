@@ -7,8 +7,12 @@ export default [
   { ignores: ['node_modules/', 'dist/', 'release/', 'data/'] },
   js.configs.recommended,
   {
-    files: ['electron/**/*.js'],
+    files: ['electron/**/*.js', 'scripts/**/*.cjs'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
+  },
+  {
+    files: ['public/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser } },
   },
   {
     files: ['scripts/**/*.mjs', '*.mjs', 'tests/**/*.js'],
@@ -31,6 +35,8 @@ export default [
     },
   },
   {
-    rules: { 'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }] },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+    },
   },
 ];

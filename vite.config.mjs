@@ -5,7 +5,8 @@ import tailwindcss from '@tailwindcss/vite';
 // Strict CSP for the packaged app only (the dev server needs inline scripts for HMR).
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'";
+  "img-src 'self' data: app-data:; media-src 'self' app-data:; font-src 'self' data:; " +
+  "connect-src 'self' app-data:; object-src 'none'";
 
 function productionCsp() {
   return {
@@ -22,7 +23,12 @@ function productionCsp() {
 export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss(), productionCsp()],
-  server: { port: 5173, strictPort: true },
+  server: {
+    port: 5173,
+    strictPort: true,
+    // npm run dev: transform the app's modules while Electron boots, instead of one request at
+    // a time when the window loads them (every page is imported at start).
+      },
   build: { outDir: 'dist', emptyOutDir: true },
   test: {
     include: ['tests/**/*.test.{js,mjs}'],

@@ -1,8 +1,9 @@
 export class ApiError extends Error {
-  constructor(message, code) {
+  constructor(message, code, fields) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
+    this.fields = fields || null; // { fieldName: message } for form validation errors
   }
 }
 
@@ -16,7 +17,7 @@ export async function invoke(channel, payload) {
   }
   if (!result || !result.ok) {
     const error = (result && result.error) || {};
-    throw new ApiError(error.message || 'Unknown error.', error.code || 'UNKNOWN');
+    throw new ApiError(error.message || 'Unknown error.', error.code || 'UNKNOWN', error.fields);
   }
   return result.data;
 }

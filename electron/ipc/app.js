@@ -1,12 +1,13 @@
 'use strict';
 
 const fs = require('fs');
-const { app, shell } = require('electron');
+const { app, clipboard, shell } = require('electron');
 const dbm = require('../db');
 const { currentVersion } = require('../db/migrate');
 
 function register(handle, { paths }) {
   handle('app:startupStatus', () => dbm.getStatus());
+  handle('app:startupProgress', () => dbm.getProgress(), { waitForDb: false });
 
   handle('app:info', () => {
     const backups = dbm.listBackups();
@@ -30,6 +31,15 @@ function register(handle, { paths }) {
   });
 
   handle('app:startFresh', () => dbm.startFresh());
+
+  // The renderer has no clipboard permission (all permission requests are denied).
+  handle(
+    'app:copyText',
+    ({ text }) => {
+      clipboard.writeText(String(text ?? '').slice(0, 10000));
+    },
+    { waitForDb: false },
+  );
 }
 
 module.exports = { register };

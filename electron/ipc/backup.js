@@ -15,11 +15,11 @@ function register(handle, { getWindow }) {
 
   handle('backup:exportTo', async () => {
     if (!dbm.isOpen()) throw new AppError('The database is not open.', 'DB_UNAVAILABLE');
-    const defaultName = backupFileName('manual').replace(/^app_/, 'StockApp_backup_');
+    const defaultName = backupFileName('manual').replace(/^app_/, 'PragatiCar_backup_');
     const result = await dialog.showSaveDialog(getWindow(), {
       title: 'Save a copy of your data',
       defaultPath: path.join(app.getPath('desktop'), defaultName),
-      filters: [{ name: 'StockApp backup', extensions: ['db'] }],
+      filters: [{ name: 'Pragati Car backup', extensions: ['db'] }],
     });
     if (result.canceled || !result.filePath) return { saved: false };
     await dbm.exportBackupTo(result.filePath);

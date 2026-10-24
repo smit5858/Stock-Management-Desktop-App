@@ -16,7 +16,12 @@ function resolvePaths({ isPackaged, execPath, env = {}, devRoot }) {
   else if (isPackaged) baseDir = path.dirname(execPath);
   else baseDir = devRoot;
 
-  const dataDir = path.join(baseDir, 'data');
+  // Dev/test only: PC_DEV_DATA_DIR points a second dev instance at a separate data folder.
+  // Never honoured in a packaged build.
+  const dataDir =
+    !isPackaged && env.PC_DEV_DATA_DIR
+      ? path.resolve(env.PC_DEV_DATA_DIR)
+      : path.join(baseDir, 'data');
   return {
     baseDir,
     dataDir,
@@ -25,6 +30,9 @@ function resolvePaths({ isPackaged, execPath, env = {}, devRoot }) {
     backupsDir: path.join(dataDir, 'backups'),
     exportsDir: path.join(dataDir, 'exports'),
     logsDir: path.join(dataDir, 'logs'),
+    brandingDir: path.join(dataDir, 'branding'),
+    imagesDir: path.join(dataDir, 'images'),
+    attachmentsDir: path.join(dataDir, 'attachments'),
     electronDir: path.join(dataDir, '.electron'),
   };
 }
@@ -35,6 +43,9 @@ function ensureDataDirs(paths) {
     paths.backupsDir,
     paths.exportsDir,
     paths.logsDir,
+    paths.brandingDir,
+    paths.imagesDir,
+    paths.attachmentsDir,
     paths.electronDir,
   ]) {
     fs.mkdirSync(dir, { recursive: true });

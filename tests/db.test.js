@@ -43,10 +43,12 @@ describe('connection', () => {
 describe('migrations', () => {
   it('creates the schema and seed data once', () => {
     const { db } = freshDb();
-    expect(currentVersion(db)).toBe(2);
+    expect(currentVersion(db)).toBe(7);
     expect(migrate(db)).toEqual([]); // second run applies nothing
     const count = (sql) => db.prepare(sql).pluck().get();
-    expect(count('SELECT COUNT(*) FROM sequences')).toBe(6);
+    expect(count('SELECT COUNT(*) FROM sequences')).toBe(12);
+    expect(count('SELECT COUNT(*) FROM product_categories')).toBe(15);
+    expect(count("SELECT value FROM settings WHERE key = 'business_name'")).toBe('Pragati Car');
     expect(db.prepare('SELECT rate_bp FROM gst_rates ORDER BY sort_order').pluck().all()).toEqual([
       0, 500, 1800, 4000,
     ]);
@@ -67,11 +69,11 @@ describe('migrations', () => {
       fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(dir, f));
     }
     fs.writeFileSync(
-      path.join(dir, '003_bad.sql'),
+      path.join(dir, '099_bad.sql'),
       'CREATE TABLE half_done (a INTEGER); INSERT INTO no_such_table VALUES (1);',
     );
     expect(() => migrate(db, dir)).toThrow();
-    expect(currentVersion(db)).toBe(2);
+    expect(currentVersion(db)).toBe(7);
     const exists = db
       .prepare("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half_done'")
       .pluck()
@@ -84,13 +86,16 @@ describe('schema rules', () => {
   it('keeps stock movements append-only', () => {
     const { db } = freshDb();
     const productId = db
-      .prepare("INSERT INTO products (name) VALUES ('Pen')")
+      .prepare("INSERT INTO products (name) VALUES ('Horn')")
       .run().lastInsertRowid;
+    const variantId = db
+      .prepare("INSERT INTO product_variants (product_id, sku) VALUES (?, 'H-1')")
+      .run(productId).lastInsertRowid;
     const id = db
       .prepare(
-        "INSERT INTO stock_movements (product_id, date, type, qty_milli) VALUES (?, '2026-10-18', 'opening', 5000)",
+        "INSERT INTO stock_movements (variant_id, date, type, qty_milli) VALUES (?, '2026-10-18', 'opening', 5000)",
       )
-      .run(productId).lastInsertRowid;
+      .run(variantId).lastInsertRowid;
     expect(() =>
       db.prepare('UPDATE stock_movements SET qty_milli = 1 WHERE id = ?').run(id),
     ).toThrow(/append-only/);
@@ -98,9 +103,9 @@ describe('schema rules', () => {
       /append-only/,
     );
     const stock = db
-      .prepare('SELECT stock_milli FROM v_product_stock WHERE product_id = ?')
+      .prepare('SELECT stock_milli FROM v_variant_stock WHERE variant_id = ?')
       .pluck()
-      .get(productId);
+      .get(variantId);
     expect(stock).toBe(5000);
   });
 
@@ -109,14 +114,14 @@ describe('schema rules', () => {
     expect(() =>
       db
         .prepare(
-          "INSERT INTO stock_movements (product_id, date, type, qty_milli) VALUES (999, '2026-10-18', 'opening', 1)",
+          "INSERT INTO stock_movements (variant_id, date, type, qty_milli) VALUES (999, '2026-10-18', 'opening', 1)",
         )
         .run(),
     ).toThrow(/FOREIGN KEY/);
     const insertSale =
       db.prepare(`INSERT INTO sales (invoice_no, series, seq_no, invoice_date, bill_type,
-      price_mode, bill_title, party_id, place_of_supply_code)
-      VALUES (?, 'sale_gst', ?, '2026-10-18', 'gst', 'exclusive', 'Tax Invoice', 1, '24')`);
+      price_mode, bill_title, party_id, customer_name, place_of_supply_code)
+      VALUES (?, 'sale_gst', ?, '2026-10-18', 'gst', 'exclusive', 'Tax Invoice', 1, 'Cash Customer', '24')`);
     insertSale.run('GST-0001', 1);
     expect(() => insertSale.run('GST-0001b', 1)).toThrow(/UNIQUE/);
   });
@@ -194,5 +199,52 @@ describe('backups', () => {
     fs.writeFileSync(paths.dbFile, 'original');
     expect(() => backup.replaceDbFile(bad, paths.dbFile)).toThrow(/damaged/);
     expect(fs.readFileSync(paths.dbFile, 'utf8')).toBe('original');
+  });
+});
+
+describe('schema fingerprint', () => {
+  it('refuses a DB whose applied migration file has since changed', () => {
+    const dir = tempDir();
+    for (const f of fs.readdirSync(MIGRATIONS_DIR)) {
+      fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(dir, f));
+    }
+    const db = openDatabase(path.join(tempDir(), 'app.db'));
+    open.push(db);
+    migrate(db, dir);
+    expect(migrate(db, dir)).toEqual([]); // unchanged files: fine
+    fs.appendFileSync(path.join(dir, '001_init.sql'), '\nCREATE TABLE extra (a INTEGER);\n');
+    expect(() => migrate(db, dir)).toThrow(/different development version/);
+  });
+});
+
+describe('upgrading an existing database', () => {
+  it('applies 003 and 004 on top of a v2 database without losing products', () => {
+    const v2 = tempDir();
+    for (const f of ['001_init.sql', '002_seed.sql']) {
+      fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(v2, f));
+    }
+    const db = openDatabase(path.join(tempDir(), 'app.db'));
+    open.push(db);
+    migrate(db, v2);
+    const pid = db
+      .prepare("INSERT INTO products (name, warranty_months) VALUES ('Old Speaker', 6)")
+      .run().lastInsertRowid;
+
+    expect(migrate(db)).toEqual([
+      '003_serials_warranty',
+      '004_parties',
+      '005_purchases',
+      '006_sales',
+      '007_warranty',
+    ]);
+    const p = db.prepare('SELECT * FROM products WHERE id = ?').get(pid);
+    expect(p).toMatchObject({
+      name: 'Old Speaker',
+      customer_warranty_months: 6,
+      supplier_warranty_months: 0,
+      warranty_start_basis: 'sale',
+      track_serials: 0,
+    });
+    expect(integrityCheck(db).ok).toBe(true);
   });
 });

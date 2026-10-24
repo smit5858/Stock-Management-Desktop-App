@@ -1,0 +1,18 @@
+# Portable build: an unpacked folder (no installer). Copy release/win-unpacked to the USB.
+appId: com.pragaticar.app
+productName: Pragati Car
+executableName: Pragati Car
+copyright: Copyright © Pragati Car
+directories:
+  output: release
+  buildResources: build
+files:
+  - electron/**/*
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - '**/*.node'
+win:
+  target: dir
+  icon: build/icon.ico

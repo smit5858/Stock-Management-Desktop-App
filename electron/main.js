@@ -2,16 +2,19 @@
 
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { app, BrowserWindow, Menu, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, nativeTheme, session } = require('electron');
 const { resolvePaths, ensureDataDirs, assertWritable } = require('./paths');
 const logger = require('./logger');
 const settingsFile = require('./settingsFile');
 const dbm = require('./db');
 const { registerIpc } = require('./ipc');
+const { registerScheme, handleProtocol } = require('./protocol');
 
+const APP_NAME = 'Pragati Car';
 const DEV_URL = app.isPackaged ? null : process.env.VITE_DEV_SERVER_URL || null;
 const INDEX_HTML = path.join(__dirname, '..', 'dist', 'index.html');
 const INDEX_URL = pathToFileURL(INDEX_HTML).href;
+const WINDOW_ICON = path.join(__dirname, 'assets', 'icon.png');
 
 const paths = resolvePaths({
   isPackaged: app.isPackaged,
@@ -20,6 +23,7 @@ const paths = resolvePaths({
   devRoot: path.resolve(__dirname, '..'),
 });
 
+const PDF_VIEWER_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 let mainWindow = null;
 let shuttingDown = false;
 let ready = Promise.resolve();
@@ -36,7 +40,7 @@ function prepareDataFolder() {
     assertWritable(paths.dataDir);
   } catch (err) {
     dialog.showErrorBox(
-      'StockApp cannot start',
+      `${APP_NAME} cannot start`,
       `The data folder cannot be written:\n${paths.dataDir}\n\n` +
         'If this is a USB drive, check that it is plugged in, not write-protected and not full.\n\n' +
         err.message,
@@ -57,7 +61,10 @@ function blockNetwork() {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const { url } = details;
     const allowed =
-      /^(file|data|blob|devtools):/.test(url) ||
+      /^(file|data|blob|devtools|app-data):/.test(url) ||
+      // Chromium's built-in PDF viewer (bundled, local) for previewing bill attachments.
+      url.startsWith(`chrome-extension://${PDF_VIEWER_ID}/`) ||
+      url.startsWith('chrome://resources/') ||
       (DEV_URL && (url.startsWith(DEV_URL) || url.startsWith(devWs)));
     if (!allowed) logger.warn('Blocked network request', url);
     callback({ cancel: !allowed });
@@ -80,14 +87,17 @@ function saveWindowPrefs(win) {
 
 function createWindow() {
   const prefs = settingsFile.read(paths.settingsFile);
+  nativeTheme.themeSource = prefs.ui.theme;
   const win = new BrowserWindow({
     width: prefs.window.width,
     height: prefs.window.height,
     minWidth: 1024,
     minHeight: 640,
     show: false,
-    title: 'StockApp',
-    backgroundColor: '#f8fafc',
+    title: APP_NAME,
+    icon: WINDOW_ICON,
+    // Matches the theme's background so there is no white flash before the first paint.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b1120' : '#f6f7fb',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -95,6 +105,9 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false, // the spellchecker would try to download dictionaries
+      autoplayPolicy: 'no-user-gesture-required', // startup jingle
+      // UI prefs reach the page before its first paint (read by preload → theme-init.js).
+      additionalArguments: [`--pc-ui=${Buffer.from(JSON.stringify(prefs.ui)).toString('base64')}`],
     },
   });
 
@@ -148,6 +161,8 @@ function main() {
     return;
   }
 
+  registerScheme();
+
   process.on('uncaughtException', (err) => logger.error('Uncaught exception', err));
   process.on('unhandledRejection', (err) => logger.error('Unhandled rejection', err));
 
@@ -166,9 +181,15 @@ function main() {
   app.on('window-all-closed', () => shutdownAndExit());
 
   app.whenReady().then(() => {
-    logger.info(`StockApp ${app.getVersion()} starting (Electron ${process.versions.electron})`);
+    logger.info(`${APP_NAME} ${app.getVersion()} starting (Electron ${process.versions.electron})`);
     if (app.isPackaged) Menu.setApplicationMenu(null);
     blockNetwork();
+    handleProtocol(paths);
+    dbm.onProgress((stage) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:startupProgress', stage);
+      }
+    });
     ready = dbm.startup(paths).catch((err) => logger.error('Database startup failed', err));
     registerIpc({ paths, ready, isTrustedUrl, getWindow: () => mainWindow });
     mainWindow = createWindow();
